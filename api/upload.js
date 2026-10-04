@@ -23,13 +23,30 @@ function readRawBody(req) {
   });
 }
 
+function extensionForType(type) {
+  const map = {
+    "application/pdf": "pdf",
+    "application/zip": "zip",
+    "application/x-zip-compressed": "zip",
+    "application/vnd.android.package-archive": "apk",
+    "text/plain": "txt",
+    "text/csv": "csv",
+    "application/json": "json",
+    "application/msword": "doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.ms-excel": "xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "application/vnd.ms-powerpoint": "ppt",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  };
+  return map[type] || "bin";
+}
+
 function detectMedia(body, headerType) {
-  // JPEG
   if (body.length >= 3 && body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff) {
-    return { isVideo: false, type: "image/jpeg", ext: "jpg" };
+    return { kind: "photo", type: "image/jpeg", ext: "jpg" };
   }
 
-  // PNG
   if (
     body.length >= 8 &&
     body[0] === 0x89 &&
@@ -37,10 +54,9 @@ function detectMedia(body, headerType) {
     body[2] === 0x4e &&
     body[3] === 0x47
   ) {
-    return { isVideo: false, type: "image/png", ext: "png" };
+    return { kind: "photo", type: "image/png", ext: "png" };
   }
 
-  // MP4 / MOV / 3GP: ISO Base Media File Format has "ftyp" at byte 4.
   if (
     body.length >= 12 &&
     body[4] === 0x66 &&
@@ -50,17 +66,24 @@ function detectMedia(body, headerType) {
   ) {
     const brand = body.toString("ascii", 8, 12).toLowerCase();
     const is3gp = brand.startsWith("3gp");
-    return { isVideo: true, type: is3gp ? "video/3gpp" : "video/mp4", ext: is3gp ? "3gp" : "mp4" };
+    return {
+      kind: "video",
+      type: is3gp ? "video/3gpp" : "video/mp4",
+      ext: is3gp ? "3gp" : "mp4",
+    };
   }
 
-  // Fallback to the request Content-Type.
-  const type = headerType || "application/octet-stream";
-  const isVideo = type.startsWith("video/");
-  return {
-    isVideo,
-    type,
-    ext: isVideo ? (type.includes("3gpp") ? "3gp" : "mp4") : (type.includes("png") ? "png" : "jpg"),
-  };
+  const type = (headerType || "application/octet-stream").split(";")[0].trim().toLowerCase();
+
+  if (type.startsWith("image/")) {
+    return { kind: "photo", type, ext: type.includes("png") ? "png" : "jpg" };
+  }
+
+  if (type.startsWith("video/")) {
+    return { kind: "video", type, ext: type.includes("3gpp") ? "3gp" : "mp4" };
+  }
+
+  return { kind: "document", type, ext: extensionForType(type) };
 }
 
 export default async function handler(req, res) {
@@ -88,13 +111,21 @@ export default async function handler(req, res) {
 
     const form = new FormData();
     form.append("chat_id", chatId);
+
+    const field = media.kind === "video" ? "video" : media.kind === "photo" ? "photo" : "document";
     form.append(
-      media.isVideo ? "video" : "photo",
+      field,
       new Blob([body], { type: media.type }),
-      `camera-${Date.now()}.${media.ext}`
+      `download-${Date.now()}.${media.ext}`
     );
 
-    const method = media.isVideo ? "sendVideo" : "sendPhoto";
+    const method =
+      media.kind === "video"
+        ? "sendVideo"
+        : media.kind === "photo"
+          ? "sendPhoto"
+          : "sendDocument";
+
     const tg = await fetch(
       `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/${method}`,
       { method: "POST", body: form }
@@ -107,7 +138,7 @@ export default async function handler(req, res) {
       return res.status(502).json({ ok: false, error: "Telegram upload failed" });
     }
 
-    return res.status(200).json({ ok: true, type: media.isVideo ? "video" : "photo" });
+    return res.status(200).json({ ok: true, type: media.kind });
   } catch (error) {
     console.error("Upload error:", error);
     return res.status(500).json({ ok: false, error: "Upload failed" });

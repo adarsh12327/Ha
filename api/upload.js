@@ -33,7 +33,8 @@ export default async function handler(req, res) {
     return res.status(401).json({ ok: false, error: "Unauthorized" });
   }
 
-  if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
+  const chatId = req.headers["x-chat-id"] || process.env.TELEGRAM_CHAT_ID;
+  if (!process.env.TELEGRAM_BOT_TOKEN || !chatId) {
     return res.status(500).json({ ok: false, error: "Telegram settings are missing" });
   }
 
@@ -47,7 +48,7 @@ export default async function handler(req, res) {
     const ext = contentType.includes("png") ? "png" : "jpg";
 
     const form = new FormData();
-    form.append("chat_id", process.env.TELEGRAM_CHAT_ID);
+    form.append("chat_id", chatId);
     form.append(
       "photo",
       new Blob([body], { type: contentType }),

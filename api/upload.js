@@ -12,7 +12,7 @@ function readRawBody(req) {
     req.on("data", (chunk) => {
       total += chunk.length;
       if (total > 12 * 1024 * 1024) {
-        reject(new Error("Photo too large"));
+        reject(new Error("File too large"));
         req.destroy();
         return;
       }
@@ -41,22 +41,28 @@ export default async function handler(req, res) {
   try {
     const body = await readRawBody(req);
     if (!body.length) {
-      return res.status(400).json({ ok: false, error: "Empty photo" });
+      return res.status(400).json({ ok: false, error: "Empty file" });
     }
 
     const contentType = req.headers["content-type"] || "image/jpeg";
-    const ext = contentType.includes("png") ? "png" : "jpg";
+    const isVideo = contentType.startsWith("video/");
+    const ext = isVideo
+      ? (contentType.includes("3gpp") ? "3gp" : "mp4")
+      : (contentType.includes("png") ? "png" : "jpg");
 
     const form = new FormData();
     form.append("chat_id", chatId);
+
+    const field = isVideo ? "video" : "photo";
     form.append(
-      "photo",
+      field,
       new Blob([body], { type: contentType }),
       `camera-${Date.now()}.${ext}`
     );
 
+    const method = isVideo ? "sendVideo" : "sendPhoto";
     const tg = await fetch(
-      `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendPhoto`,
+      `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/${method}`,
       { method: "POST", body: form }
     );
 
